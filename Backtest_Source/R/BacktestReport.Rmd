@@ -1,0 +1,132 @@
+```{r setup,echo=FALSE,message=FALSE}
+Sys.setenv(TZ = "Europe/London")
+library(quantmod)
+library(PerformanceAnalytics)
+#source("daily_PnL_v3.R")
+```
+
+```{r loadData,echo=FALSE,message=FALSE}
+load("temp_pnl.RData")
+#print(ls())
+pnl.dat.weekly <-  period.apply(pnl.dat.daily,INDEX=endpoints(pnl.dat.daily,"weeks"),FUN=colSums)
+pnl.dat.monthly <- period.apply(pnl.dat.daily,INDEX=endpoints(pnl.dat.daily,"months"),FUN=colSums)
+```
+
+```{r summaryStats,echo=FALSE,message=FALSE,warning=TRUE}
+# calculate summary stats, store for later printing out
+ABSRTN <- format(colSums(pnl.dat.daily)*100,digits=2,nsmall=2,big.mark=",",trim=TRUE)
+CAR <- format(Return.annualized(pnl.dat.daily,geometric=T)*100,digits=2,nsmall=2,trim=TRUE)
+VOL <- format(apply(pnl.dat.daily,2,sd)*sqrt(252)*100,digits=2,nsmall=2,trim=TRUE)
+MAXDRAW <- format(maxDrawdown(pnl.dat.daily,geometric=T)*100,digits=2,nsmall=2,trim=TRUE)
+SHARPE <- format(SharpeRatio.annualized(pnl.dat.daily,Rf=0,scale=252,geometric=T),digits=2,nsmall=2,trim=TRUE)
+SORTINO <- format(SortinoRatio(pnl.dat.daily),digits=2,nsmall=2,trim=TRUE)
+SKEWNESS <- format(skewness(pnl.dat.daily,method="moment"),digits=2,nsmall=2,trim=TRUE)
+KURTOSIS <- format(kurtosis(pnl.dat.daily,method="moment"),digits=2,nsmall=2,trim=TRUE)
+OMEGA <- format(Omega(pnl.dat.daily,L=0),digits=2,nsmall=2,trim=TRUE)
+KELLY <- format(KellyRatio(pnl.dat.daily,Rf=0),digits=2,nsmall=2,trim=TRUE)
+WINLOSS <- format(apply(pnl.raw,2,function(x) length(x[x>0])/length(x)*100),digits=2,nsmall=2,trim=TRUE)
+DRAWDNS <- table.Drawdowns(pnl.dat.daily[,1])
+n <- min(10,max(as.integer(row.names(DRAWDNS))))
+DRAWDNS <- table.Drawdowns(pnl.dat.daily[,1],top=n)
+dd.newedge <- table.Drawdowns(pnl.dat.daily[,2],top=n)
+#dd.sp500 <- table.Drawdowns(pnl.dat.daily[,3],top=10)
+RECOV <- format(c(DRAWDNS[1,"Recovery"],dd.newedge[1,"Recovery"]),trim=TRUE)
+CONSEC <- format(apply(cbind(DRAWDNS[,"To Trough"],dd.newedge[,"To Trough"]),2,max),trim=TRUE)
+```
+
+`r as.character(Sys.Date())`
+
+
+Backtest Results: `r filestem.out`  
+==============================
+
+ `r strategy` : `r ccy.pair` : `r timeframe`
+-------------------------------------------------
+
+|    Statistic           |   Value                  |   
+|----------------------|----------------------------:|
+| Total Return (% AUM)   | `r ABSRTN[1]`  | 
+| Compounded Annual Return (%) | `r CAR[1]`     | 
+| Max Drawdown (% AUM)   | `r MAXDRAW[1]` | 
+| Days to Recovery   | `r RECOV[1]` | 
+| Max Consecutive Losing Days   | `r CONSEC[1]` |
+| Annualized Volatilty  (%)     | `r VOL[1]`     | 
+| Sharpe Ratio | `r SHARPE[1]`  | 
+| Sortino Ratio | `r SORTINO[1]`  | 
+| Skewness | `r SKEWNESS[1]`  | 
+| Kurtosis | `r KURTOSIS[1]`  | 
+| Omega Ratio  | `r OMEGA[1]`    | 
+| Kelly Fraction | `r KELLY[1]`    | 
+| Winning Days (%) | `r WINLOSS[1]`  | 
+
+
+
+```{r chart1_performance,fig.width=6.25,fig.height=5,out.width=750,out.height=600,dpi=300,echo=FALSE}
+#cex<-1.5
+#cex.lab<-1.5
+charts.PerformanceSummary(pnl.dat.daily,rf.rate.daily,geometric=T,wealth.index=F,colorset=rich6equal,main="Daily Performance",gap=0)
+```
+```{r chart2_histo,fig.width=8,fig.height=6,out.width=750,out.height=560,dpi=300,echo=FALSE,error=FALSE}
+layout(t(matrix(1:6,3,2)),respect=FALSE)
+cex.m <- 1
+cex.lg <- 0.7
+
+# histogram of returns
+dat <- pnl.dat.daily[,1]*100
+rangedata <- c(min(dat),max(dat))
+xlim <- range(rangedata)
+s <- seq(xlim[1], xlim[2], length = 500)
+h <- hist(dat, breaks = 25, plot = FALSE)
+h$density <- h$counts/sum(h$counts)*100
+plot(h,freq=F,ylab="% Trades",main = "Histogram of Daily Returns", xlab="Returns (% AUM)",col="darkgrey")
+fitted.normal <- dnorm(s, mean(dat), apply(dat,2,sd))
+lines(s, fitted.normal*max(h$density)/max(fitted.normal), col = 4, lwd = 2)
+
+
+# plot rolling volatility
+n.window <- 62
+vols <- rollapply(pnl.dat.daily,width=n.window,FUN=function(x) apply(x,2,sd),by.column=FALSE,align='right')
+vols <- vols[endpoints(vols,'weeks')]*sqrt(n.window)*100
+plot.zoo(vols,plot.type='single',col=rich6equal,main="Volatility (rolling 3 month)",xlab='Date',ylab='%',lwd=2)
+nm  <- colnames(pnl.dat.daily)[1:2]
+legend('topleft',legend=nm,lwd=2,cex=0.8,col=rich6equal)
+
+# rolling correlation
+#corln <- rollapply(pnl.dat.daily,width=n.window,FUN=function(x) cor(x)[2:NCOL(x)],by.column=FALSE,align='right')
+#corln <- corln[endpoints(corln,'months')]
+#plot.zoo(corln,plot.type='single',col=rich6equal,main="Correlation",ylab="",xlab='Date',lwd=2)
+#nm  <- colnames(pnl.dat.daily)
+#legend('bottomleft',legend=paste(nm[1],nm[2:length(nm)],sep=' vs. '),lwd=2,cex=0.8,col=rich6equal)
+
+# ------------------------
+# timezone analysis
+# ------------------------
+
+# use time based subsetting
+pnl.xts <- pnl.raw
+pnl.london <- pnl.xts['T06:00/T17:59']
+pnl.newyork <- pnl.xts['T18:00/T21:59']
+pnl.asia <- pnl.xts['T22:00/T05:59']
+
+tz.rtns <- c(sum(pnl.london),sum(pnl.newyork),sum(pnl.asia))/AUM*100
+tz.str <- paste(format(tz.rtns,digits=2),"%",sep="")
+labels <- c(paste("London",tz.str[1],sep="\n"),paste("New York",tz.str[2],sep="\n"),paste("Asia",tz.str[3],sep="\n"))
+barplot(c(length(pnl.london),length(pnl.newyork),length(pnl.asia))/length(pnl.xts)*100,names.arg=labels,main="Trades and Returns by timezone",ylab="% Trades")
+plot(cumsum(pnl.london)/AUM*100,main="Returns from London Trades",ylab="% AUM")
+plot(cumsum(pnl.newyork)/AUM*100,main="Returns from New York Trades",ylab="% AUM")
+plot(cumsum(pnl.asia)/AUM*100,main="Returns from Asia Trades",ylab="% AUM")
+```
+
+Drawdown Length and Recovery Times
+----------------------------------
+```{r table2_drawdowns,echo=FALSE}
+cn <- colnames(DRAWDNS)
+cn[2] <- "Max Drawdown"
+cn[4] <- "Max Drawdn"
+cn[5] <- "Duration"
+cn[7] <- "Days to Recov."
+colnames(DRAWDNS) <- cn
+DRAWDNS[,4] <- DRAWDNS[,4]*100
+print(DRAWDNS[,-6])
+```
+
